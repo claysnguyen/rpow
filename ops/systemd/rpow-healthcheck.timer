@@ -1,0 +1,10 @@
+[Unit]
+Description=Probe rpow-server /health every 90 seconds
+
+[Timer]
+OnBootSec=60
+OnUnitActiveSec=90
+AccuracySec=5
+
+[Install]
+WantedBy=timers.target

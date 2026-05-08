@@ -44,6 +44,11 @@ export async function buildApp(opts: BuildAppOptions): Promise<FastifyInstance> 
   const app = Fastify({
     logger: opts.test ? false : { level: 'info' },
     disableRequestLogging: !!opts.test,
+    // Honor X-Forwarded-For only when the connection comes from nginx on
+    // localhost. Without this, req.ip is always 127.0.0.1 in production and
+    // the per-IP rate limit on /auth/request is useless. Loopback-only here so
+    // arbitrary clients can't spoof their IP via the header.
+    trustProxy: '127.0.0.1',
   });
 
   app.decorate('pool', opts.pool);
