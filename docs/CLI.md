@@ -1,195 +1,271 @@
-# rpow CLI — Hướng dẫn chạy từ terminal
+# rpow CLI — Hướng dẫn cài đặt và đào
 
-> Bạn có thể đăng nhập, đào, gửi, xem balance & ledger hoàn toàn từ terminal — không cần trình duyệt. CLI dùng chung API và session với web (`rpow2.com`).
+> CLI để đào RPOW token từ terminal. Hỗ trợ macOS, Linux, WSL.
 
-## 1. Yêu cầu
+---
 
-| | |
-|---|---|
-| Node.js | ≥ 22 (`nvm install 22.20.0` nếu chưa có) |
-| Hệ điều hành | macOS / Linux / WSL (Windows native chưa test, nên hoạt động) |
-| Server | Mặc định trỏ tới `https://api.rpow2.com`. Có thể đổi qua biến `RPOW_API` |
+## Mục lục
 
-## 2. Cài đặt
+1. [Quickstart (5 dòng cho dev)](#1-quickstart-5-dòng-cho-dev)
+2. [Yêu cầu hệ thống](#2-yêu-cầu-hệ-thống)
+3. [Cài đặt](#3-cài-đặt)
+4. [Login và đào lần đầu](#4-login-và-đào-lần-đầu)
+5. [Tham chiếu lệnh](#5-tham-chiếu-lệnh)
+6. [Hashrate và difficulty](#6-hashrate-và-difficulty)
+7. [Đào 24/7 và đa tài khoản](#7-đào-247-và-đa-tài-khoản)
+8. [Troubleshooting](#8-troubleshooting)
+9. [An toàn và lưu ý](#9-an-toàn-và-lưu-ý)
 
-### Cách A — chạy trong monorepo (dev / lập trình viên)
+---
+
+## 1. Quickstart (5 dòng cho dev)
+
+Giả sử source code đã có sẵn ở `~/rpow`:
 
 ```bash
-git clone https://github.com/<bạn>/rpow.git
-cd rpow
-npm install
-npm run build --workspace @rpow/shared
-npm run build --workspace @rpow/cli
-npm install                              # chạy lại để npm tạo symlink ./node_modules/.bin/rpow
+cd ~/rpow
+npm install && npm run build --workspace @rpow/shared && npm run build --workspace @rpow/cli && npm install
+alias rpow="$(pwd)/node_modules/.bin/rpow"
+rpow login bạn@example.com   # paste verify URL từ email vào prompt
+rpow mine --forever          # đào với cpus-2 worker mặc định
+```
 
-# Test cài đặt thành công
+Chưa quen Node.js / chưa có source → đọc tiếp [phần 3](#3-cài-đặt).
+
+---
+
+## 2. Yêu cầu hệ thống
+
+| Hạng mục | Yêu cầu | Ghi chú |
+|---|---|---|
+| **CPU** | Càng nhiều core càng tốt | M1 Pro 10c → ~10 MH/s; Intel i5 4c → ~2 MH/s |
+| **RAM** | ≥ 2 GB free | Mỗi worker ~30 MB |
+| **Đĩa cứng** | ~500 MB | Source + node_modules |
+| **HĐH** | macOS, Linux, WSL | Windows native chưa test |
+| **Node.js** | ≥ 22.x | Khuyến nghị `nvm install 22.20.0` |
+| **Email** | hộp thư thật bạn check được | Server gửi magic link xác thực |
+| **Internet** | Kết nối ra `api.rpow2.com` | ~5 KB/lần mint |
+
+> Mining tốn điện. Laptop M1 chạy `mine --workers 8` ăn ~30W → mỗi giờ ~0.03 kWh ≈ 100 VND. PC/VPS x86 có thể ăn 80–150W tùy chip.
+
+---
+
+## 3. Cài đặt
+
+### Bước 1: Cài Node.js 22
+
+**macOS (qua Homebrew + nvm — khuyến nghị):**
+
+```bash
+# Cài Homebrew nếu chưa có
+/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+
+# Cài nvm
+brew install nvm
+mkdir -p ~/.nvm
+echo 'export NVM_DIR="$HOME/.nvm"' >> ~/.zshrc
+echo '[ -s "/opt/homebrew/opt/nvm/nvm.sh" ] && \. "/opt/homebrew/opt/nvm/nvm.sh"' >> ~/.zshrc
+source ~/.zshrc
+
+# Cài Node 22
+nvm install 22
+nvm use 22
+node --version  # nên in v22.x.x
+```
+
+**Linux (Ubuntu/Debian):**
+
+```bash
+curl -fsSL https://deb.nodesource.com/setup_22.x | sudo bash -
+sudo apt-get install -y nodejs
+node --version
+```
+
+**Cách khác:** [nodejs.org/download](https://nodejs.org/en/download) — chọn LTS 22.x.
+
+### Bước 2: Lấy source code
+
+Bạn sẽ nhận source qua một trong các kênh sau (do người chia sẻ cung cấp riêng):
+
+- **File ZIP / tarball** → giải nén vào `~/rpow`:
+  ```bash
+  cd ~
+  unzip rpow.zip          # hoặc: tar -xzf rpow.tar.gz
+  cd rpow
+  ```
+- **Private git repo** → clone:
+  ```bash
+  cd ~
+  git clone <REPO_URL> rpow
+  cd rpow
+  ```
+- **Folder share trực tiếp** (Drive, AirDrop, USB) → copy vào `~/rpow`.
+
+> Không có thì hỏi người đã chia sẻ doc này cho bạn.
+
+### Bước 3: Build
+
+```bash
+cd ~/rpow
+npm install                                   # cài deps cho monorepo
+npm run build --workspace @rpow/shared        # build shared lib
+npm run build --workspace @rpow/cli           # build CLI thành dist/index.js
+npm install                                   # CHẠY LẠI để npm tạo symlink
+```
+
+**Tại sao chạy `npm install` 2 lần?** Lần 1 chưa có `apps/cli/dist/index.js` (file binary chưa build), nên npm bỏ qua bước tạo symlink `node_modules/.bin/rpow`. Sau khi build xong, lần 2 mới symlink được.
+
+### Bước 4: Test cài đặt
+
+```bash
 ./node_modules/.bin/rpow help
 ```
 
-> Tại sao phải `npm install` 2 lần: lần đầu workspace chưa có `dist/index.js` nên npm bỏ qua bước symlink bin. Sau khi build xong, lần install thứ hai mới tạo `node_modules/.bin/rpow`.
+Nếu thấy banner và danh sách lệnh → cài đặt OK.
 
-Nếu thấy gõ đường dẫn dài bất tiện, thêm shortcut vào shell:
+### Bước 5 (khuyến nghị): Tạo alias gọn
 
-```bash
-# ~/.zshrc hoặc ~/.bashrc
-alias rpow="$HOME/đường-dẫn-tới-rpow/node_modules/.bin/rpow"
-```
-
-### Cách B — cài global (sau khi đã publish lên npm)
+Gõ `./node_modules/.bin/rpow` mỗi lần phiền. Thêm vào `~/.zshrc` hoặc `~/.bashrc`:
 
 ```bash
-npm i -g @rpow/cli
-rpow help
+alias rpow="$HOME/rpow/node_modules/.bin/rpow"
 ```
 
-Hiện tại package chưa publish public, dùng cách A trước.
+Mở terminal mới hoặc `source ~/.zshrc`. Từ đây mọi lệnh dùng `rpow ...` thay vì đường dẫn dài.
 
-## 3. Cấu hình
+### Bước 6 (tùy chọn): Đo hashrate trước khi đào
 
-CLI tuân theo XDG Base Directory:
+```bash
+rpow bench --seconds 10
+```
 
-| File | Mặc định | Mục đích |
+Output kiểu:
+
+```text
++ rpow bench
+  cpu      : Apple M1 Pro  (10 logical cores)
+  workers  : 8  (multi-core)
+  ...
++ result
+  rate     : 10.18 MH/s
+```
+
+Tham khảo:
+
+| Máy | Hashrate ước lượng | Thời gian/mint @ 25-bit |
 |---|---|---|
-| Config | `~/.config/rpow/config.json` | `{ "apiBaseUrl": "..." }` |
-| Session | `~/.config/rpow/session` | Chuỗi cookie token (mode 0600) |
+| MacBook Air M1 (8c) | ~6 MH/s | ~5–6s |
+| MacBook Pro M1 Pro (10c) | ~10 MH/s | ~3–4s |
+| MacBook Pro M3 Max (16c) | ~20 MH/s | ~2s |
+| Desktop Ryzen 7950X (32c) | ~30 MH/s | ~1s |
+| Old Intel i5 (4c) | ~2 MH/s | ~15–20s |
 
-Override `apiBaseUrl` bằng 1 trong 3 cách (ưu tiên giảm dần):
+---
 
-1. Biến môi trường `RPOW_API` cho lần chạy đó:
-   ```bash
-   RPOW_API=http://localhost:8080 rpow ledger
-   ```
-2. Sửa file `~/.config/rpow/config.json`:
-   ```json
-   { "apiBaseUrl": "http://localhost:8080" }
-   ```
-3. Để mặc định `https://api.rpow2.com` (production).
-
-Đổi vị trí thư mục config bằng `XDG_CONFIG_HOME` (hữu dụng cho đa-account, xem mục 7).
-
-## 4. Workflow nhanh — 60 giây đầu tiên
+## 4. Login và đào lần đầu
 
 ```bash
-# 1. Test xem có với tới server không (lệnh public, không cần login)
+# 1. Xem ledger công khai (không cần login, để test kết nối)
 rpow ledger
+```
 
-# 2. Yêu cầu magic link
+Nên thấy: tổng minted, supply hiện tại, độ khó, milestone tiếp theo.
+
+```bash
+# 2. Đăng ký / đăng nhập
 rpow login bạn@example.com
-# → Server gửi email. Mở email, COPY toàn bộ URL "/auth/verify?token=..."
-# → Dán URL vào dấu nhắc của CLI, Enter
+```
 
-# 3. Kiểm tra đăng nhập
+Server sẽ gửi 1 email tới hộp thư bạn nhập. Mở email → copy **toàn bộ URL** (kiểu `https://api.rpow2.com/auth/verify?token=...`) → dán vào dấu nhắc của CLI:
+
+```
+> paste verify URL or token: https://api.rpow2.com/auth/verify?token=Ab3...xyz
+```
+
+Enter. Nếu thành công, CLI in `+ logged in as bạn@example.com`. Session lưu ở `~/.config/rpow/session` (mode 0600).
+
+> **Lỡ mất dấu nhắc?** Email vẫn còn, dùng:
+> ```bash
+> rpow login --url 'https://api.rpow2.com/auth/verify?token=...'
+> ```
+
+```bash
+# 3. Xem ví (nên là 0 lúc đầu)
 rpow me
+```
 
-# 4. Đào 1 token thử (mặc định dùng cpus-2 worker, ví dụ M1 Pro 10c → 8 process)
+```bash
+# 4. Đào thử 1 token
 rpow mine
+```
 
-# 5. Đào liên tục (Ctrl-C để dừng)
+Output:
+
+```text
+[ workers=8 (multi-core) ]
+[ challenge 8f3a2cb1... target 25 bits ]
+  mining  hashes=12,800,000  rate=10.18 MH/s  elapsed=00:00:01
++ MINTED  token=8f3a2c01-...   (#1)
+done. minted 1 token(s).
+```
+
+Mỗi token = 1 RPOW (giá trị nguyên, không chia nhỏ).
+
+```bash
+# 5. Đào liên tục cho đến khi Ctrl-C
 rpow mine --forever
 
-# 5b. Đo hashrate trước khi mine (không tốn challenge, không gọi API)
-rpow bench --seconds 10
-
-# 6. Gửi 1 RPOW cho ai đó
-rpow send alice@x.com 1
-
-# 7. Xem 100 dòng activity gần nhất
+# 6. Xem 100 dòng activity gần nhất
 rpow activity
+
+# 7. Đăng xuất (xoá session local)
+rpow logout
 ```
 
-## 5. Tham chiếu từng lệnh
+---
+
+## 5. Tham chiếu lệnh
 
 ### `rpow help`
 
-In banner + danh sách lệnh + đường dẫn config dir đang dùng.
+In banner, danh sách lệnh, đường dẫn config dir đang dùng.
 
-### `rpow login <email>`
+### `rpow login <email>` / `rpow login --url <verify_url>`
 
-1. POST `/auth/request` để server gửi magic link tới email.
-2. Hiển thị dấu nhắc `> paste verify URL or token:`
-3. Bạn copy URL từ email (hoặc chỉ phần token sau `?token=`) và dán vào.
-4. CLI gọi `/auth/verify`, đọc cookie `rpow_session`, lưu vào `~/.config/rpow/session` mode 0600.
+| Chế độ | Lệnh | Khi nào dùng |
+|---|---|---|
+| Tương tác | `rpow login bạn@x.com` | Server gửi link, bạn paste vào prompt |
+| Phi tương tác | `rpow login --url 'https://...auth/verify?token=...'` | Đã có link, hoặc prompt timeout |
 
-**Tip cho dev local**: khi server chạy với `RPOW_TEST_INBOX=true`, magic link sẽ in luôn ra console của server thay vì gửi email. Hoặc lấy nhanh bằng:
-
-```bash
-curl -s "http://localhost:8080/test/last-link/$(printf 'bạn@example.com' | jq -sRr @uri)?json=1"
-# {"link":"http://localhost:8080/auth/verify?token=..."}
-```
-
-Lỗi thường gặp:
-- `RATE_LIMITED (retry in ~30s)` — gọi `login` 2 lần quá gần nhau cho cùng email. Đợi 30s.
-- `BAD_REQUEST: invalid or expired link` — token đã được dùng (1 lần duy nhất) hoặc quá 15 phút.
+Magic link có hạn 15 phút, dùng được 1 lần. Session sau khi login có hạn 30 ngày.
 
 ### `rpow me`
 
-```text
-+-- WALLET ----------------------------------------------------+
-  EMAIL    : bạn@example.com
-  BALANCE  : 0042 RPOW
-  MINTED   : 0042
-  SENT     : 0010
-  RECEIVED : 0010
-+-------------------------------------------------------------+
-```
-
-Yêu cầu session hợp lệ. Nếu hết hạn (mặc định 30 ngày), CLI sẽ báo `session expired. run: rpow login <email>`.
+In ví: email, balance, đã mint, đã gửi, đã nhận.
 
 ### `rpow mine [flags]`
 
 | Flag | Ý nghĩa |
 |---|---|
-| `--count N` / `-n N` | Đào đúng N token rồi dừng. Mặc định: 1. |
-| `--forever` / `-f` | Đào không giới hạn cho đến khi Ctrl-C hoặc `SUPPLY_EXHAUSTED`. |
-| `--workers N` / `-w N` | Số process đào song song. Mặc định: `cpus().length - 2` (ví dụ M1 Pro 10c → 8). Đặt `1` để chạy single-thread. |
+| `--count N` / `-n N` | Đào đúng N token rồi dừng (mặc định: 1) |
+| `--forever` / `-f` | Đào không giới hạn cho đến Ctrl-C hoặc `SUPPLY_EXHAUSTED` |
+| `--workers N` / `-w N` | Số process đào song song (mặc định: `cpus().length - 2`) |
 
-Output mẫu (dạng live, dùng `\r` để cập nhật tại chỗ):
+**Ctrl-C 2 giai đoạn:**
+- Lần 1: đào nốt batch hiện tại rồi dừng sạch.
+- Lần 2: kill ngay (exit 130).
 
-```text
-[ workers=8 (multi-core) ]
-[ challenge 8f3a2cb1... target 25 bits ]
-  mining  hashes=12,847,360  rate=10.20 MH/s  elapsed=00:00:01
-+ MINTED  token=8f3a2c01-...   (#1)
-[ challenge 1de4fa90... target 25 bits ]
-  mining  hashes=8,323,072    rate=10.15 MH/s  elapsed=00:00:01
-+ MINTED  token=1de4fa11-...   (#2)
-```
-
-**Cách hoạt động của multi-core**: CLI fork N process Node con, mỗi process đào shard riêng của nonce-space (chia theo high-32-bit, không bao giờ trùng input). Process đầu tiên tìm được solution → main thread terminate phần còn lại và submit lên server. Dùng `child_process.fork` thay vì `worker_threads` vì macOS deprioritize compute trong worker thread.
-
-**Khi nào nên giảm `--workers`**:
-- Đang chạy app khác cần CPU (build, video call, render)
-- Laptop pin sắp hết — mỗi worker tốn 4–5W
-- Nóng máy / quạt ồn — laptop 14" thermal throttle sau ~5 phút full-load
-
-**Khi nào nên tăng**: nếu máy có > 10 core và `rpow bench --workers 12` cho thấy rate vẫn tăng đáng kể.
+**Đào song song hoạt động thế nào:** CLI fork N child process Node, mỗi process đào shard riêng của không gian nonce (chia theo high-32-bit, không bao giờ trùng). Process đầu tiên tìm thấy → main thread terminate phần còn lại và submit lên server. Trên macOS dùng `child_process.fork` thay `worker_threads` để tránh scheduler deprioritize compute (8 worker_threads = 4.1 MH/s vs 8 fork = 10.2 MH/s trên M1 Pro).
 
 ### `rpow bench [flags]`
 
-Đo hashrate offline, không gọi API, không tốn challenge. Hữu ích để:
-- So sánh nhiều cấu hình `--workers` trên máy bạn để tìm sweet spot
-- Smoke-test sau khi đổi code/Node version
-- Benchmark giữa các máy
+Benchmark hashrate offline — không gọi API, không tốn challenge.
 
-| Flag | Ý nghĩa |
-|---|---|
-| `--workers N` / `-w N` | Số process song song. Mặc định: `cpus().length - 2`. |
-| `--seconds S` / `-s S` | Thời lượng bench tính bằng giây. Mặc định: `10`. |
-| `--bits B` / `-b B` | Difficulty mục tiêu. Mặc định: `64` (không bao giờ trúng → đo rate thuần). |
-
-```bash
-$ rpow bench --workers 8 --seconds 8
-+ rpow bench
-  cpu      : Apple M1 Pro  (10 logical cores)
-  workers  : 8  (multi-core)
-  seconds  : 8
-  bits     : 64 (unhittable in window — pure rate test)
-
-+ result
-  hashes   : 81,461,248
-  elapsed  : 00:00:08
-  rate     : 10.18 MH/s
-```
+| Flag | Ý nghĩa | Mặc định |
+|---|---|---|
+| `--workers N` | Số process song song | `cpus-2` |
+| `--seconds S` | Thời lượng đo | `10` |
+| `--bits B` | Difficulty target (cao → không bao giờ trúng → đo rate thuần) | `64` |
 
 Map scaling curve cho máy bạn:
 
@@ -197,88 +273,87 @@ Map scaling curve cho máy bạn:
 for n in 1 2 4 6 8 10; do rpow bench --workers $n --seconds 6 | grep rate; done
 ```
 
-**Ctrl-C 2 giai đoạn**:
-- Lần 1: `^C  finishing current attempt cleanly...` — đào nốt batch hiện tại rồi dừng sạch (challenge chưa nộp sẽ tự hết hạn sau 5 phút).
-- Lần 2: kill ngay (exit 130).
-
-Các trạng thái server có thể trả về:
-- `SUPPLY_EXHAUSTED` (HTTP 410) — đã đạt cap 21M, CLI in `+ SUPPLY EXHAUSTED — 21M cap reached` và dừng.
-- `CHALLENGE_EXPIRED` (HTTP 410) — challenge quá 5 phút, CLI tự xin challenge mới và đào tiếp.
-- 401 — session hết hạn, CLI báo lỗi.
-
 ### `rpow send <recipient_email> <amount>`
 
-- `amount` phải là số nguyên dương ≤ balance.
-- CLI tự sinh `idempotency_key = crypto.randomUUID()` cho mỗi lần gọi (gọi lại cùng lệnh **sẽ** tạo transfer mới — idempotency chỉ áp dụng khi bạn gửi cùng key).
-- Nếu recipient đã có account: token được invalidate ở sender + mint lại cho recipient ngay lập tức.
-- Nếu recipient chưa có: tạo `pending_transfer`, server gửi email "claim link" (TTL 30 ngày). CLI in:
-  ```text
-  + pending claim 5 RPOW -> alice@x.com
-    alice@x.com has no rpow2 account yet — invited via email
-    tokens reserved for 30 days; transfer_id=...
-  ```
+Gửi N token cho người khác. `amount` là số nguyên dương ≤ balance.
 
-Lỗi:
-- `INSUFFICIENT_BALANCE` — không đủ token.
-- `BAD_REQUEST` — recipient trùng sender, email sai format, v.v.
+- Nếu recipient đã có account: token bị "burn" ở sender, mint mới ở recipient ngay.
+- Nếu chưa có: tạo *pending transfer*, server email link claim. Recipient có 30 ngày để click link và tự đăng ký.
 
 ### `rpow activity`
 
-Bảng 100 dòng gần nhất:
-
-```text
-+-- ACTIVITY (latest 100) -------------------------------------+
-  2026-05-08 04:12:08  MINT       +1
-  2026-05-08 04:11:55  SEND       -3   alice@x.com
-  2026-05-07 22:01:33  RECEIVE    +2   bob@y.com
-+-------------------------------------------------------------+
-```
+100 dòng gần nhất (mint, send, receive).
 
 ### `rpow ledger`
 
-Lệnh public, **không cần login**. In tổng cung, độ khó hiện tại, milestone tiếp theo, trạng thái cap:
-
-```text
-+-- PUBLIC LEDGER ---------------------------------------------+
-  TOTAL MINTED        : 18,402
-  TOTAL TRANSFERRED   : 1,205
-  CIRCULATING SUPPLY  : 18,310
-  CURRENT DIFFICULTY  : 25 trailing zero bits
-  USER COUNT          : 142
-
-  MAX SUPPLY          : 21,000,000
-  EPOCH               : 0
-  NEXT MILESTONE      : 1,000,000  (981,598 to go)
-  NEXT DIFFICULTY     : 26 bits
-+-------------------------------------------------------------+
-```
+Public, **không cần login**. Tổng cung, độ khó, milestone tiếp theo.
 
 ### `rpow logout`
 
-Gọi `POST /auth/logout` (best-effort) và xoá file `~/.config/rpow/session`.
+Best-effort gọi server invalidate session, sau đó xoá `~/.config/rpow/session`.
 
-## 6. Use case nâng cao
+---
 
-### 6.1 Đào 24/7 trên VPS với `tmux`
+## 6. Hashrate và difficulty
+
+### Hashrate là gì?
+
+**1 hash = 1 lần tính SHA-256 của (challenge + nonce).** MH/s = mega-hashes/s = triệu hash/s. Cao càng nhanh tìm ra solution.
+
+Hashrate phụ thuộc:
+- **Số core CPU** — quan trọng nhất, scale gần như tuyến tính qua `--workers`.
+- **Tốc độ từng core** — Apple Silicon nhanh hơn Intel cùng đời.
+- **Nhiệt** — laptop full-load 5–10 phút sẽ thermal throttle, hashrate giảm 10–20%.
+- **Background apps** — Chrome 50 tab, Docker… ăn cores.
+
+### Difficulty bits
+
+Server đặt độ khó theo schedule: 25 bit hiện tại, mỗi 1 triệu token tăng 1 bit. Mỗi bit thêm = thời gian đào **gấp đôi**.
+
+| Bit | Hash trung bình | Thời gian @ 10 MH/s |
+|---|---|---|
+| 22 | 4.2M | 0.4s |
+| 25 | 33.5M | 3.3s |
+| 28 | 268M | 27s |
+| 30 | 1.07B | 1m47s |
+
+### "Đôi khi mất 1s, đôi khi mất 30s — bug à?"
+
+Không. Đào PoW có *random luck*. Số hash cần thiết theo phân phối hình học: trung bình `2^N` hash, nhưng từng lần cụ thể có thể cao hơn hoặc thấp hơn rất nhiều. Trung bình theo thời gian dài → đúng `2^N`. Đừng panic khi 1 challenge mất 5× thời gian dự kiến.
+
+### `RATE_LIMITED` đôi lúc?
+
+Server giới hạn:
+- 30s cooldown giữa 2 magic link cho 1 email.
+- ~30 challenge/phút/IP.
+- 100 mint/phút/user.
+
+CLI có sẵn **exponential backoff retry** (1s → 2s → 4s → ...). Nó tự đợi và thử lại — bạn không cần làm gì.
+
+---
+
+## 7. Đào 24/7 và đa tài khoản
+
+### 7.1 Đào liên tục với `tmux` (laptop / VPS)
 
 ```bash
-ssh you@vps
+ssh you@your-vps                        # nếu trên VPS
 tmux new -s rpow
-rpow mine --forever
-# Ctrl-b d để detach (mining vẫn chạy)
-# tmux attach -t rpow để xem lại
+rpow mine --forever --workers 6
+# Ctrl-b d  để detach (mining vẫn chạy)
+# tmux attach -t rpow  để xem lại
 ```
 
-Hoặc dùng `nohup`:
+Hoặc `nohup` (không cần tmux):
 
 ```bash
 nohup rpow mine --forever > ~/rpow.log 2>&1 &
 tail -f ~/rpow.log
 ```
 
-### 6.2 Systemd service (đào trên server Linux)
+### 7.2 Daemon trên Linux (systemd)
 
-Tạo `/etc/systemd/system/rpow-miner.service`:
+`/etc/systemd/system/rpow-miner.service`:
 
 ```ini
 [Unit]
@@ -290,7 +365,7 @@ Type=simple
 User=you
 Environment=HOME=/home/you
 Environment=XDG_CONFIG_HOME=/home/you/.config
-ExecStart=/usr/local/bin/rpow mine --forever --workers 6
+ExecStart=/home/you/rpow/node_modules/.bin/rpow mine --forever --workers 6
 Restart=on-failure
 RestartSec=30
 
@@ -304,21 +379,19 @@ sudo systemctl enable --now rpow-miner
 journalctl -u rpow-miner -f
 ```
 
-### 6.3 Đa tài khoản trên cùng máy
+### 7.3 Đa tài khoản trên cùng máy
 
-Mỗi account có thư mục config riêng:
+Mỗi account 1 thư mục config riêng:
 
 ```bash
-# Account A
 XDG_CONFIG_HOME=$HOME/.config-acc-a rpow login alice@x.com
 XDG_CONFIG_HOME=$HOME/.config-acc-a rpow mine --forever --workers 4 &
 
-# Account B
 XDG_CONFIG_HOME=$HOME/.config-acc-b rpow login bob@x.com
 XDG_CONFIG_HOME=$HOME/.config-acc-b rpow mine --forever --workers 4 &
 ```
 
-Hoặc đặt alias cho gọn:
+Tiện hơn với alias:
 
 ```bash
 alias rpow-a='XDG_CONFIG_HOME=$HOME/.config-acc-a rpow'
@@ -328,139 +401,73 @@ rpow-a me
 rpow-b send alice@x.com 5
 ```
 
-> **Lưu ý CPU**: mỗi `rpow mine` mặc định fork `cpus-2` worker. Nếu chạy 2 account cùng lúc, hai instance sẽ tranh CPU nhau và tổng hashrate KHÔNG tăng tuyến tính. Tốt hơn là chia: ví dụ 10 core → mỗi account `--workers 4`, chừa 2 core cho hệ thống.
+> **Lưu ý CPU:** 2 instance `mine` mặc định mỗi instance lấy `cpus-2` worker → tổng vượt số core, tranh nhau, hashrate KHÔNG cộng tuyến tính. Tốt hơn: chia thủ công (10 core → mỗi instance `--workers 4`, chừa 2 core cho hệ thống).
 
-### 6.4 Trỏ tới server local khi dev
+---
 
-**Cách nhanh nhất** — dùng helper script tự lo Postgres + sinh key + set env:
+## 8. Troubleshooting
 
-```bash
-# Terminal A
-npm run dev
-```
+### Cài đặt
 
-Script `scripts/dev-server.sh` sẽ:
-- Tự phát hiện Postgres (Homebrew local DB `rpow`, hoặc Docker on `:55432`); nếu không có sẽ in hướng dẫn cài.
-- Build `@rpow/shared` lần đầu nếu chưa build.
-- Sinh ephemeral `SESSION_SECRET` + Ed25519 keypair mỗi lần chạy (in-memory, không lưu).
-- Bật `RPOW_TEST_INBOX=true` → magic link in ra console thay vì gửi email thật.
-- `DIFFICULTY_BITS=8` để đào nhanh khi test.
-- Khởi động Fastify ở `:8080` qua tsx watch (hot reload khi sửa source).
+| Triệu chứng | Xử lý |
+|---|---|
+| `npm error Missing script: "build"` ở `~` | `cd ~/rpow` rồi thử lại |
+| `node: command not found` | Quay lại [bước 1](#bước-1-cài-nodejs-22) |
+| `bash: rpow: command not found` | Chạy `npm install` lần 2 sau khi build, hoặc `source ~/.zshrc` để apply alias |
+| `Login incorrect` | Đã gõ `login user@x.com` không có `rpow` đứng trước → kích hoạt lệnh `login` của macOS. Gõ `rpow login user@x.com` |
+| `tsc: command not found` | Chạy `npm install` ở root repo |
 
-Trong terminal 2, dùng CLI:
+### Đăng nhập
 
-```bash
-export RPOW_API=http://localhost:8080
-rpow ledger                # confirm kết nối
-rpow login dev@local.test
-# Magic link sẽ IN RA console của terminal 1; copy URL đó dán vào CLI
-rpow mine --count 5        # difficulty 8-bit nên rất nhanh
-rpow me
-```
+| Triệu chứng | Xử lý |
+|---|---|
+| Không nhận được email | Check spam. Nếu vẫn không có sau 5 phút → sai email hoặc server gửi email gặp sự cố. Đợi 30s rồi thử lại |
+| `error: NO_COOKIE: server did not set rpow_session cookie` | Token đã được dùng / quá 15 phút. Chạy lại `rpow login` |
+| `error: session expired` | Quá 30 ngày từ lần login. Login lại |
+| Lỡ mất prompt nhưng còn email | `rpow login --url 'URL_TỪ_EMAIL'` |
 
-### 6.5 Pipeline với jq / awk
+### Mining
 
-CLI hiện in dạng người-đọc, chưa có flag `--json`. Khi cần xử lý máy, gọi thẳng API:
+| Triệu chứng | Xử lý |
+|---|---|
+| `error: fetch failed` | Mất mạng hoặc server tạm down. CLI tự retry với exponential backoff — đợi 1–2 phút |
+| `RATE_LIMITED` lặp lại | Đang chạy quá nhiều account/instance trên cùng IP. Giảm bớt |
+| Hashrate thấp bất thường | Có app khác ăn CPU. Check `top` / Activity Monitor |
+| Mining đứng im không tiến | Đang chạy nhưng terminal không phải TTY (do `tee`/redirect). Mining VẪN chạy, chỉ là không in `\r` progress |
+| `INVALID_SOLUTION` | Bug nghiêm trọng — báo cáo issue kèm `challenge_id` |
+| `SUPPLY_EXHAUSTED` | Đã đạt cap 21M. Hết — không ai đào được nữa |
 
-```bash
-SESSION=$(cat ~/.config/rpow/session)
-curl -s -H "Cookie: rpow_session=$SESSION" $RPOW_API/me | jq .balance
-```
-
-Sau này có thể bổ sung flag `--json` cho mọi lệnh nếu bạn cần.
-
-## 7. Troubleshooting
-
-| Triệu chứng | Nguyên nhân | Xử lý |
-|---|---|---|
-| `rpow: command not found` | Chưa symlink hoặc shell không biết `node_modules/.bin/` | Chạy `npm install` lần 2 sau khi build, hoặc `alias rpow="$(pwd)/node_modules/.bin/rpow"` |
-| `error: fetch failed` | Server không reachable | Kiểm tra `RPOW_API` đúng chưa, server có chạy không |
-| `error: NO_COOKIE: server did not set rpow_session cookie` | Token đã được dùng/hết hạn lúc CLI gọi `/auth/verify` | Chạy lại `rpow login` để xin link mới |
-| `error: not signed in. run: rpow login <email>` | File `~/.config/rpow/session` trống/rỗng | Đăng nhập lại |
-| `error: session expired. run: rpow login <email>` | HMAC session đã quá 30 ngày | Đăng nhập lại |
-| `error: RATE_LIMITED` khi `login` | Cooldown 30s/email hoặc 30 lần/giờ/email | Đợi `retry_after` giây |
-| Mining đứng im không tiến | Đang chạy nhưng terminal không phải TTY (tee, redirect) | Mining vẫn chạy, chỉ là không in `\r` progress |
-
-Bật log thô của server (khi dev) để debug request:
-
-```bash
-# server tự log mọi request qua pino, xem ở terminal chạy server
-```
-
-Reset hoàn toàn về trạng thái sạch:
+### Reset hoàn toàn
 
 ```bash
 rpow logout
 rm -rf ~/.config/rpow
 ```
 
-## 8. Bảo mật & lưu ý
+Sau đó `rpow login ...` để bắt đầu lại.
 
-- File `~/.config/rpow/session` được set mode `0600` — chỉ user của bạn đọc được. Nó chứa HMAC token tương đương cookie trình duyệt; ai cầm được file là **đăng nhập được vào account của bạn**. Không commit vào git, không upload.
-- Magic link chỉ dùng được 1 lần và có hạn 15 phút. Nếu bạn vô tình paste vào nơi khác, link đó coi như đã "cháy".
-- Mining trên CPU rất "ngốn" — laptop sẽ nóng, quạt chạy mạnh. Khi cắm sạc thì OK; chạy bằng pin chỉ nên dùng `--count N` chứ đừng `--forever`.
-- Mặc định `cpus-2` worker là tối ưu cho desktop / khi bạn không dùng máy. Khi đang code/họp, hạ xuống `--workers 2` hoặc `--workers 4` để giữ máy mượt.
+---
 
-## 9. Phiên đầy đủ minh hoạ (production)
+## 9. An toàn và lưu ý
 
-```bash
-$ rpow ledger
-+-- PUBLIC LEDGER ---------------------------------------------+
-  TOTAL MINTED        : 142
-  TOTAL TRANSFERRED   : 8
-  CIRCULATING SUPPLY  : 134
-  CURRENT DIFFICULTY  : 25 trailing zero bits
-  USER COUNT          : 6
-  ...
-+-------------------------------------------------------------+
+### Bảo mật session
 
-$ rpow login bạn@example.com
-+ magic link sent to bạn@example.com
-  open the link in the email, then paste the FULL URL below
-  (it looks like https://api.rpow2.com/auth/verify?token=...)
+- File `~/.config/rpow/session` mode `0600` — chỉ user của bạn đọc được. Đây là HMAC token tương đương cookie trình duyệt; **ai cầm được file = đăng nhập được vào ví của bạn**. Đừng commit, đừng upload, đừng gửi qua chat.
+- **Magic link** dùng được **1 lần**, hạn **15 phút**. Vô tình paste vào nơi khác = "cháy".
+- Nghi ngờ session bị lộ: `rpow logout && rm ~/.config/rpow/session && rpow login <email>` để xin session mới.
 
-> paste verify URL or token: https://api.rpow2.com/auth/verify?token=Ab3...xyz
+### Vận hành máy
 
-+ logged in as bạn@example.com
-  session saved (~/.config/rpow/session, mode 0600)
-  try: rpow me
+- Mining trên CPU **rất ngốn điện và toả nhiệt**. Laptop nóng, quạt ồn là bình thường.
+- Pin tụt rất nhanh khi chạy `--forever` (1–2 giờ là hết). Chỉ chạy khi cắm sạc.
+- Khi đang code/họp Zoom/render: hạ `--workers 2` hoặc `--workers 4` để giữ máy mượt.
 
-$ rpow me
-+-- WALLET ----------------------------------------------------+
-  EMAIL    : bạn@example.com
-  BALANCE  : 0000 RPOW
-  MINTED   : 0000
-  SENT     : 0000
-  RECEIVED : 0000
-+-------------------------------------------------------------+
+### Giới hạn
 
-$ rpow mine --count 3
-[ workers=8 (multi-core) ]
-[ challenge 8f3a2cb1... target 25 bits ]
-  mining  hashes=12,800,000  rate=10.18 MH/s  elapsed=00:00:01
-+ MINTED  token=8f3a2c01-...   (#1/3)
-[ challenge 1de4fa90... target 25 bits ]
-  mining  hashes=4,915,200   rate=10.21 MH/s  elapsed=00:00:00
-+ MINTED  token=1de4fa11-...   (#2/3)
-[ challenge a7be0142... target 25 bits ]
-  mining  hashes=22,937,600  rate=10.15 MH/s  elapsed=00:00:02
-+ MINTED  token=a7be01ff-...   (#3/3)
-done. minted 3 token(s).
+- Token RPOW không quy đổi USD/VND, không niêm yết sàn nào — đây là pet project.
+- Server có thể tắt bất cứ lúc nào — đừng đổ nhiều công sức vào nếu không sẵn sàng mất.
+- Database có thể reset (đã từng xảy ra trong giai đoạn dev).
 
-$ rpow send alice@x.com 1
-+ SENT 1 RPOW -> alice@x.com
-  transfer_id=3f7a2cd0-1234-...
+---
 
-$ rpow activity
-+-- ACTIVITY (latest 100) -------------------------------------+
-  2026-05-08 05:12:08  SEND       -1   alice@x.com
-  2026-05-08 05:11:30  MINT       +1
-  2026-05-08 05:11:08  MINT       +1
-  2026-05-08 05:10:50  MINT       +1
-+-------------------------------------------------------------+
-
-$ rpow logout
-+ logged out (local session removed)
-```
-
-Hết. Khi cần xem lại nhanh, gõ `rpow help`.
+Hết. Khi cần xem lại nhanh: `rpow help`.
