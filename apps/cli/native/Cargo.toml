@@ -10,7 +10,7 @@ crate-type = ["cdylib"]
 [dependencies]
 napi = { version = "2", default-features = false, features = ["napi8"] }
 napi-derive = "2"
-sha2 = { version = "0.10", features = ["asm"] }
+sha2 = { version = "0.10", features = ["asm", "compress"] }
 
 [build-dependencies]
 napi-build = "2"
