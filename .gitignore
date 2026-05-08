@@ -15,3 +15,8 @@ coverage/
 playwright-report/
 test-results/
 *.tsbuildinfo
+
+# Rust native miner build artifacts (per-platform binary, rebuilt locally).
+apps/cli/native/target/
+apps/cli/native/Cargo.lock
+apps/cli/native/*.node

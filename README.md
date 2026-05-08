@@ -44,10 +44,13 @@ See `docs/RUNBOOK.md` for operator instructions.
 
 ## Terminal client (`rpow` CLI)
 
-A pure-Node CLI lives in `apps/cli`. No browser required — login by pasting the magic-link URL from your inbox; mine, send, and check balances entirely from the shell. Mines multi-core (`child_process.fork` per shard) — ~10 MH/s on M1 Pro 10c, scales near-linearly with cores.
+A multi-core CLI lives in `apps/cli`. No browser required — login by pasting the magic-link URL from your inbox; mine, send, and check balances entirely from the shell. Optional Rust + napi-rs native miner uses ARM SHA crypto (Apple Silicon) / SHA-NI (Linux x86_64) for ~25–30x speedup over pure JS. **Primary target: macOS** (M-series). Linux supported. Windows: use WSL2 or the JS fallback.
+
+Hashrate ballpark on Apple Silicon with native: M1 Pro 10c → ~250 MH/s, M4 mini base 10c → ~280 MH/s. JS fallback is ~10 MH/s.
 
 ```bash
 npm install && npm run build --workspace @rpow/shared && npm run build --workspace @rpow/cli && npm install
+npm run build:native -w @rpow/cli   # optional: builds Rust binding for ~25x speedup (needs rustup)
 alias rpow="$(pwd)/node_modules/.bin/rpow"
 rpow help
 ```

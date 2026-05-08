@@ -4,9 +4,13 @@
   "private": true,
   "type": "module",
   "main": "./dist/index.js",
-  "bin": { "rpow": "./dist/index.js" },
+  "bin": {
+    "rpow": "./dist/index.js"
+  },
   "scripts": {
-    "build": "tsc -b && chmod +x dist/index.js",
+    "build": "tsc -b && node -e \"require('fs').chmodSync('dist/index.js', 0o755)\"",
+    "build:native": "node native/build-native.mjs",
+    "build:all": "npm run build:native && npm run build",
     "start": "node dist/index.js",
     "test": "vitest run"
   },

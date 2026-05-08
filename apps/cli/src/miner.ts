@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto';
+import { loadNativeMiner } from './miner-native.js';
 
 export interface MineProgress {
   hashes: bigint;
@@ -56,11 +57,7 @@ export function makeDifficultyChecker(bits: number): (h: Buffer) => boolean {
 export async function mine(prefixHex: string, difficultyBits: number, opts: MineOpts = {}): Promise<bigint | null> {
   if (prefixHex.length % 2 !== 0) throw new Error('odd-length prefix hex');
   const prefix = Buffer.from(prefixHex, 'hex');
-  const buf = Buffer.alloc(prefix.length + 8);
-  prefix.copy(buf, 0);
-  const offset = prefix.length;
-  const checker = makeDifficultyChecker(difficultyBits);
-
+  const native = loadNativeMiner();
   const batch = opts.batchSize ?? 65536;
   const hiStep = (opts.hiStep ?? 1) >>> 0;
   let lo = 0;
@@ -68,6 +65,46 @@ export async function mine(prefixHex: string, difficultyBits: number, opts: Mine
   const startedAt = performance.now();
   let lastReport = startedAt;
   let totalHashes = 0;
+
+  if (native) {
+    // Native path: autotune chunk size conservatively to reduce JS<->native
+    // overhead while keeping abort/SIGINT responsiveness. We target short
+    // native calls (~4-8ms) and clamp aggressively so behavior remains stable.
+    let nativeBatch = Math.max(1, batch * 4);
+    const minNativeBatch = Math.max(1024, batch);
+    const maxNativeBatch = Math.max(minNativeBatch, batch * 64);
+    while (!(opts.abortSignal?.aborted)) {
+      const callStartedAt = performance.now();
+      const r = native.hashSearch(prefix, difficultyBits, hi, hiStep, lo, nativeBatch);
+      const callMs = performance.now() - callStartedAt;
+      totalHashes += r.hashes;
+      if (r.found) {
+        return (BigInt(r.nonceHi >>> 0) << 32n) | BigInt(r.nonceLo >>> 0);
+      }
+      hi = r.nextHi >>> 0;
+      lo = r.nextLo >>> 0;
+      // Keep each native invocation short to avoid hurting control-plane
+      // responsiveness (Ctrl-C/abort/progress updates).
+      if (callMs < 6 && r.hashes === nativeBatch && nativeBatch < maxNativeBatch) {
+        nativeBatch = Math.min(maxNativeBatch, nativeBatch << 1);
+      } else if (callMs > 16 && nativeBatch > minNativeBatch) {
+        nativeBatch = Math.max(minNativeBatch, nativeBatch >>> 1);
+      }
+      const now = performance.now();
+      if (opts.onProgress && now - lastReport > 250) {
+        opts.onProgress({ hashes: BigInt(totalHashes), elapsedMs: now - startedAt });
+        lastReport = now;
+      }
+      await new Promise<void>((resolve) => setImmediate(resolve));
+    }
+    return null;
+  }
+
+  // JS fallback path (no native binary available for this platform).
+  const buf = Buffer.alloc(prefix.length + 8);
+  prefix.copy(buf, 0);
+  const offset = prefix.length;
+  const checker = makeDifficultyChecker(difficultyBits);
 
   while (!(opts.abortSignal?.aborted)) {
     for (let i = 0; i < batch; i++) {

@@ -1,5 +1,6 @@
 import { ApiClient, isApiError, type ApiError } from '../api.js';
 import { defaultWorkers, minePool } from '../miner-pool.js';
+import { nativeAvailable } from '../miner-native.js';
 import { c, die, fmtElapsed, fmtRate, progressDone, progressLine } from '../ui.js';
 
 interface MineFlags {
@@ -33,7 +34,10 @@ function parseFlags(args: string[]): MineFlags {
   return { count, workers };
 }
 
-const MAX_BACKOFF_MS = 30_000;
+// Aggressive retry: prioritize mining uptime over being polite to the server.
+// Schedule (with ±30% jitter): 1s, 2s, 2s, 2s, ... so worst-case recovery latency
+// after an outage is ~2-3s. Trade-off: ~30 req/min on /challenge during outages.
+const MAX_BACKOFF_MS = 2_000;
 const BASE_BACKOFF_MS = 1_000;
 
 interface AbortSignal { aborted: boolean }
@@ -47,11 +51,14 @@ async function abortableSleep(ms: number, abort: AbortSignal): Promise<void> {
 }
 
 function backoffFor(attempt: number, e: unknown): number {
+  // RATE_LIMITED: trust the server's retry_after fully — undercutting it gets us
+  // banned. Only apply a small floor (250ms) to avoid a 0-second tight loop.
   if (isApiError(e) && e.error === 'RATE_LIMITED' && typeof e.retry_after === 'number') {
-    return Math.min(MAX_BACKOFF_MS, e.retry_after * 1000);
+    return Math.max(250, e.retry_after * 1000);
   }
-  // 1s, 2s, 4s, 8s, 16s, 30s, 30s, ...
-  return Math.min(MAX_BACKOFF_MS, BASE_BACKOFF_MS * Math.pow(2, Math.min(attempt - 1, 5)));
+  const base = Math.min(MAX_BACKOFF_MS, BASE_BACKOFF_MS * Math.pow(2, Math.min(attempt - 1, 5)));
+  // ±30% jitter so multiple clients on the same machine don't sync their probes.
+  return Math.floor(base * (0.7 + Math.random() * 0.6));
 }
 
 function describe(e: unknown): string {
@@ -79,7 +86,12 @@ async function callWithRetry<T>(
       if (isFatal(e)) throw e;
       attempt++;
       const delay = backoffFor(attempt, e);
-      console.log(c.yellow(`  ${label} transient: ${describe(e)} — retry in ${Math.round(delay / 1000)}s (#${attempt})`));
+      // Throttle: log attempts 1-3 in full, then once every 10 retries to keep
+      // the console readable during multi-minute outages.
+      if (attempt <= 3 || attempt % 10 === 0) {
+        const sec = (delay / 1000).toFixed(delay < 1000 ? 2 : 1);
+        console.log(c.yellow(`  ${label} transient: ${describe(e)} — retry in ${sec}s (#${attempt})`));
+      }
       await abortableSleep(delay, abort);
     }
   }
@@ -128,7 +140,8 @@ export async function mineCmd(args: string[]): Promise<void> {
 
   let mined = 0;
   const target = flags.count;
-  console.log(c.dim(`[ workers=${flags.workers} ${flags.workers === 1 ? '(single-thread)' : '(multi-core)'} ]`));
+  const backend = nativeAvailable() ? 'native' : 'js';
+  console.log(c.dim(`[ workers=${flags.workers} backend=${backend} ${flags.workers === 1 ? '(single-thread)' : '(multi-core)'} ]`));
 
   while ((target === null || mined < target) && !abort.aborted) {
     // 1. Get a challenge (with transient retry).

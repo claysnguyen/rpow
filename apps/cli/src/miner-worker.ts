@@ -20,6 +20,7 @@
  */
 import { createHash } from 'node:crypto';
 import { makeDifficultyChecker } from './miner.js';
+import { loadNativeMiner } from './miner-native.js';
 
 interface InitData {
   prefixHex: string;
@@ -38,10 +39,7 @@ if (!raw) throw new Error('miner-worker: missing init data in argv[2]');
 const data = JSON.parse(raw) as InitData;
 
 const prefix = Buffer.from(data.prefixHex, 'hex');
-const buf = Buffer.alloc(prefix.length + 8);
-prefix.copy(buf, 0);
-const offset = prefix.length;
-const checker = makeDifficultyChecker(data.difficultyBits);
+const native = loadNativeMiner();
 
 let lo = 0;
 let hi = data.startHi >>> 0;
@@ -51,6 +49,7 @@ const reportEveryMs = data.reportEveryMs;
 
 let aborted = false;
 let totalHashes = 0;
+let nativeBatchState = Math.max(1, batch * 4);
 
 const startedAt = performance.now();
 let lastReport = startedAt;
@@ -63,7 +62,63 @@ process.on('message', (msg: { type?: string }) => {
 // in the background after the user Ctrl-C'd the parent.
 process.on('disconnect', () => { aborted = true; });
 
-function step(): void {
+function emitFound(nonceHi: number, nonceLo: number, hashesAdded: number): void {
+  totalHashes += hashesAdded;
+  send({
+    type: 'found',
+    nonce: (((BigInt(nonceHi >>> 0) << 32n) | BigInt(nonceLo >>> 0))).toString(),
+    hashes: totalHashes,
+  });
+  // Stay alive briefly so the message flushes before exit.
+  setTimeout(() => process.exit(0), 50);
+}
+
+// --- Native path (Rust + ARM SHA crypto / SHA-NI). ~30x faster per core. ---
+function stepNative(): void {
+  if (aborted) {
+    send({ type: 'aborted', hashes: totalHashes });
+    process.exit(0);
+  }
+  // Native chunk autotune:
+  // - increase chunk size when calls are very short (reduce IPC/scheduler overhead)
+  // - decrease when calls get too long (keep abort and control-plane responsive)
+  // Bounds are conservative to keep runtime behavior stable.
+  const minNativeBatch = Math.max(1024, batch);
+  const maxNativeBatch = Math.max(minNativeBatch, batch * 64);
+  let nativeBatch = nativeBatchState;
+  const callStartedAt = performance.now();
+  const r = native!.hashSearch(prefix, data.difficultyBits, hi, hiStep, lo, nativeBatch);
+  const callMs = performance.now() - callStartedAt;
+  if (r.found) {
+    emitFound(r.nonceHi, r.nonceLo, r.hashes);
+    return;
+  }
+  totalHashes += r.hashes;
+  // Binding contract: when found == false, nextHi/nextLo points to the next
+  // nonce to try (Rust loop already advanced past the last hashed value).
+  hi = r.nextHi >>> 0;
+  lo = r.nextLo >>> 0;
+  if (callMs < 6 && r.hashes === nativeBatch && nativeBatch < maxNativeBatch) {
+    nativeBatch = Math.min(maxNativeBatch, nativeBatch << 1);
+  } else if (callMs > 16 && nativeBatch > minNativeBatch) {
+    nativeBatch = Math.max(minNativeBatch, nativeBatch >>> 1);
+  }
+  const now = performance.now();
+  if (now - lastReport >= reportEveryMs) {
+    send({ type: 'progress', hashes: totalHashes, elapsedMs: now - startedAt });
+    lastReport = now;
+  }
+  nativeBatchState = nativeBatch;
+  setImmediate(stepNative);
+}
+
+// --- JS fallback (current production path). Used when native is unavailable. ---
+const buf = Buffer.alloc(prefix.length + 8);
+prefix.copy(buf, 0);
+const offset = prefix.length;
+const checker = makeDifficultyChecker(data.difficultyBits);
+
+function stepJs(): void {
   if (aborted) {
     send({ type: 'aborted', hashes: totalHashes });
     process.exit(0);
@@ -73,14 +128,7 @@ function step(): void {
     buf.writeUInt32LE(hi, offset + 4);
     const h = createHash('sha256').update(buf).digest();
     if (checker(h)) {
-      totalHashes += i + 1;
-      send({
-        type: 'found',
-        nonce: (((BigInt(hi) << 32n) | BigInt(lo))).toString(),
-        hashes: totalHashes,
-      });
-      // Stay alive briefly so the message flushes before exit.
-      setTimeout(() => process.exit(0), 50);
+      emitFound(hi, lo, i + 1);
       return;
     }
     lo = (lo + 1) >>> 0;
@@ -92,7 +140,11 @@ function step(): void {
     send({ type: 'progress', hashes: totalHashes, elapsedMs: now - startedAt });
     lastReport = now;
   }
-  setImmediate(step);
+  setImmediate(stepJs);
 }
 
-step();
+if (native) {
+  stepNative();
+} else {
+  stepJs();
+}

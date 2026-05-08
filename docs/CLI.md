@@ -1,6 +1,6 @@
 # rpow CLI — Hướng dẫn cài đặt và đào
 
-> CLI để đào RPOW token từ terminal. Hỗ trợ macOS, Linux, WSL.
+> CLI để đào RPOW token từ terminal. **Target chính: macOS** (Apple Silicon được tối ưu mạnh nhất). Linux hỗ trợ. Windows native không hỗ trợ — dùng WSL2 nếu trên Windows.
 
 ---
 
@@ -25,9 +25,10 @@ Giả sử source code đã có sẵn ở `~/rpow`:
 ```bash
 cd ~/rpow
 npm install && npm run build --workspace @rpow/shared && npm run build --workspace @rpow/cli && npm install
+npm run build:native -w @rpow/cli   # tùy chọn nhưng nên: ~25x speedup nếu có Rust
 alias rpow="$(pwd)/node_modules/.bin/rpow"
-rpow login bạn@example.com   # paste verify URL từ email vào prompt
-rpow mine --forever          # đào với cpus-2 worker mặc định
+rpow login bạn@example.com          # paste verify URL từ email vào prompt
+rpow mine --forever                 # đào với cpus-2 worker mặc định
 ```
 
 Chưa quen Node.js / chưa có source → đọc tiếp [phần 3](#3-cài-đặt).
@@ -41,7 +42,7 @@ Chưa quen Node.js / chưa có source → đọc tiếp [phần 3](#3-cài-đặ
 | **CPU** | Càng nhiều core càng tốt | M1 Pro 10c → ~10 MH/s; Intel i5 4c → ~2 MH/s |
 | **RAM** | ≥ 2 GB free | Mỗi worker ~30 MB |
 | **Đĩa cứng** | ~500 MB | Source + node_modules |
-| **HĐH** | macOS, Linux, WSL | Windows native chưa test |
+| **HĐH** | macOS (target chính), Linux | Windows: dùng WSL2; native không build trên Windows |
 | **Node.js** | ≥ 22.x | Khuyến nghị `nvm install 22.20.0` |
 | **Email** | hộp thư thật bạn check được | Server gửi magic link xác thực |
 | **Internet** | Kết nối ra `api.rpow2.com` | ~5 KB/lần mint |
@@ -115,6 +116,34 @@ npm install                                   # CHẠY LẠI để npm tạo sym
 
 **Tại sao chạy `npm install` 2 lần?** Lần 1 chưa có `apps/cli/dist/index.js` (file binary chưa build), nên npm bỏ qua bước tạo symlink `node_modules/.bin/rpow`. Sau khi build xong, lần 2 mới symlink được.
 
+### Bước 3.5 (tùy chọn): Build native miner cho ~25x speedup
+
+CLI có sẵn engine native bằng Rust dùng được hardware crypto của CPU (Apple SHA crypto extension trên Apple Silicon, SHA-NI trên Intel/AMD). Build xong, hashrate tăng ~25x trên M-series Mac, 5–10x trên x86_64.
+
+**Yêu cầu**: Rust toolchain. Cài 1 dòng:
+
+```bash
+curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
+source "$HOME/.cargo/env"
+```
+
+**Build native module**:
+
+```bash
+npm run build:native --workspace @rpow/cli
+```
+
+Script tự build với `-C target-cpu=native` rồi đặt file `.node` đúng chỗ. Nếu thiếu Rust thì script chỉ in cảnh báo và bỏ qua → CLI vẫn chạy bình thường ở chế độ JS fallback.
+
+**Verify**:
+
+```bash
+./node_modules/.bin/rpow bench --workers 1 --seconds 5
+# Tìm dòng: backend  : native (Rust + HW SHA)
+```
+
+Nếu thấy `js (Node createHash)` → native không load được, đọc [Troubleshooting](#8-troubleshooting). Nếu thấy `native` → ăn full speed.
+
 ### Bước 4: Test cài đặt
 
 ```bash
@@ -144,21 +173,23 @@ Output kiểu:
 ```text
 + rpow bench
   cpu      : Apple M1 Pro  (10 logical cores)
+  backend  : native (Rust + HW SHA)
   workers  : 8  (multi-core)
   ...
 + result
-  rate     : 10.18 MH/s
+  rate     : 235.12 MH/s
 ```
 
-Tham khảo:
+Tham khảo Apple Silicon (đã build native):
 
-| Máy | Hashrate ước lượng | Thời gian/mint @ 25-bit |
-|---|---|---|
-| MacBook Air M1 (8c) | ~6 MH/s | ~5–6s |
-| MacBook Pro M1 Pro (10c) | ~10 MH/s | ~3–4s |
-| MacBook Pro M3 Max (16c) | ~20 MH/s | ~2s |
-| Desktop Ryzen 7950X (32c) | ~30 MH/s | ~1s |
-| Old Intel i5 (4c) | ~2 MH/s | ~15–20s |
+| Máy | Hashrate native | Hashrate JS (fallback) | Thời gian/mint @ 25-bit |
+|---|---|---|---|
+| MacBook Air M1 (8c) | ~150 MH/s | ~6 MH/s | < 1s |
+| MacBook Pro M1 Pro (10c) | ~250 MH/s | ~10 MH/s | < 1s |
+| Mac mini M4 base (10c) | ~280 MH/s | ~13 MH/s | < 1s |
+| MacBook Pro M3 Max (16c) | ~500 MH/s | ~20 MH/s | < 1s |
+
+> Apple Silicon scale gần tuyến tính vì mọi P/E core đều có ARM SHA crypto extension. Linux x86_64 với SHA-NI cũng chạy native được nhưng kém hơn nhiều. Windows không hỗ trợ native — dùng WSL2 nếu cần.
 
 ---
 
@@ -436,6 +467,15 @@ rpow-b send alice@x.com 5
 | Mining đứng im không tiến | Đang chạy nhưng terminal không phải TTY (do `tee`/redirect). Mining VẪN chạy, chỉ là không in `\r` progress |
 | `INVALID_SOLUTION` | Bug nghiêm trọng — báo cáo issue kèm `challenge_id` |
 | `SUPPLY_EXHAUSTED` | Đã đạt cap 21M. Hết — không ai đào được nữa |
+
+### Native miner
+
+| Triệu chứng | Xử lý |
+|---|---|
+| `bench` hiện `backend: js` dù đã chạy `build:native` | Check `apps/cli/native/rpow_miner_native.darwin-arm64.node` (hoặc `linux-x64`) có tồn tại không. Nếu không → `npm run build:native -w @rpow/cli` lại |
+| `[build-native] cargo not found` | Cài Rust: `curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \| sh && source $HOME/.cargo/env` |
+| `cargo build failed` với lỗi compiler | Update Rust: `rustup update stable` (cần ≥ 1.88) |
+| `[build-native] Windows is not a supported native target` | Native chỉ build trên macOS/Linux. Trên Windows dùng JS fallback hoặc WSL2 |
 
 ### Reset hoàn toàn
 

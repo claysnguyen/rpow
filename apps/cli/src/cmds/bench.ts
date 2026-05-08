@@ -1,5 +1,6 @@
 import os from 'node:os';
 import { defaultWorkers, minePool } from '../miner-pool.js';
+import { nativeAvailable } from '../miner-native.js';
 import { c, die, fmtElapsed, fmtRate, progressDone, progressLine } from '../ui.js';
 
 interface BenchFlags {
@@ -53,8 +54,10 @@ export async function benchCmd(args: string[]): Promise<void> {
   const cpu = (() => {
     try { return os.cpus()[0]?.model ?? 'unknown CPU'; } catch { return 'unknown CPU'; }
   })();
+  const backend = nativeAvailable() ? c.green('native (Rust + HW SHA)') : c.dim('js (Node createHash)');
   console.log(c.bold('+ rpow bench'));
   console.log(`  cpu      : ${cpu}  (${os.cpus().length} logical cores)`);
+  console.log(`  backend  : ${backend}`);
   console.log(`  workers  : ${flags.workers}  ${flags.workers === 1 ? '(single-thread)' : '(multi-core)'}`);
   console.log(`  seconds  : ${flags.seconds}`);
   console.log(`  bits     : ${flags.bits} ${flags.bits >= 40 ? c.dim('(unhittable in window — pure rate test)') : c.dim('(may complete early on a real hit)')}`);
