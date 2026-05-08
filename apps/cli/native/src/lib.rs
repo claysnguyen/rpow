@@ -178,6 +178,66 @@ pub fn hash_search(
             next_lo: lo,
         });
     }
+
+    // Deep fast-path (2 blocks): same compress-level approach for longer inputs
+    // that still fit in 2 SHA-256 blocks.
+    if fast64 && prefix_len + 8 <= 119 {
+        let msg_len = prefix_len + 8;
+        let mut blocks_buf = [0u8; 128];
+        blocks_buf[..prefix_len].copy_from_slice(prefix_bytes);
+        blocks_buf[msg_len] = 0x80;
+        let bit_len = (msg_len as u64) * 8;
+        blocks_buf[120..128].copy_from_slice(&bit_len.to_be_bytes());
+        let nonce_offset = prefix_len;
+
+        while hashes < max_iter {
+            let nonce = ((hi as u64) << 32) | (lo as u64);
+            blocks_buf[nonce_offset..nonce_offset + 8].copy_from_slice(&nonce.to_le_bytes());
+
+            // SHA-256 IV
+            let mut state: [u32; 8] = [
+                0x6a09e667, 0xbb67ae85, 0x3c6ef372, 0xa54ff53a,
+                0x510e527f, 0x9b05688c, 0x1f83d9ab, 0x5be0cd19,
+            ];
+
+            // SAFETY: GenericArray<u8, U64> and [u8; 64] share layout.
+            let blocks: &[GenericArray<u8, U64>] = unsafe {
+                core::slice::from_raw_parts(
+                    (&blocks_buf as *const [u8; 128]).cast::<GenericArray<u8, U64>>(),
+                    2,
+                )
+            };
+            compress256(&mut state, blocks);
+
+            hashes += 1;
+            if passes_fast64_state(&state, fast_mask) {
+                return Ok(SearchResult {
+                    found: true,
+                    nonce_hi: hi,
+                    nonce_lo: lo,
+                    hashes,
+                    next_hi: hi,
+                    next_lo: lo,
+                });
+            }
+
+            let (next_lo, lo_carry) = lo.overflowing_add(1);
+            lo = next_lo;
+            if lo_carry {
+                hi = hi.wrapping_add(hi_step);
+            }
+        }
+
+        return Ok(SearchResult {
+            found: false,
+            nonce_hi: 0,
+            nonce_lo: 0,
+            hashes,
+            next_hi: hi,
+            next_lo: lo,
+        });
+    }
+
     while hashes < max_iter {
         // Write nonce (little-endian) into stack-allocated bytes.
         //
