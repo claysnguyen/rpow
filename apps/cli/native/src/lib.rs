@@ -63,20 +63,20 @@ fn passes(
 
 #[inline(always)]
 fn passes_fast64(digest: &[u8], fast_mask: u64) -> bool {
-    // SAFETY:
-    // - `digest` has 32 bytes, reading 8 bytes at offset 24 is in bounds.
-    // - `read_unaligned` is valid regardless of alignment.
-    let tail = u64::from_le(unsafe {
-        (digest.as_ptr().add(24) as *const u64).read_unaligned()
-    });
+    // trailing-zero check is over the least-significant digest bits.
+    // SHA-256 output bytes are big-endian, so bytes[24..32] form the low 64 bits
+    // as a big-endian u64.
+    let tail = u64::from_be_bytes([
+        digest[24], digest[25], digest[26], digest[27],
+        digest[28], digest[29], digest[30], digest[31],
+    ]);
     (tail & fast_mask) == 0
 }
 
 #[inline(always)]
 fn passes_fast64_state(state: &[u32; 8], fast_mask: u64) -> bool {
-    // SHA-256 digest bytes are big-endian words h0..h7. Tail bytes are h6||h7.
-    // Build the 64-bit big-endian word then byte-swap to match our LE bit test.
-    let tail = (((state[6] as u64) << 32) | (state[7] as u64)).swap_bytes();
+    // state words are digest words in big-endian order; low 64 bits are h6||h7.
+    let tail = ((state[6] as u64) << 32) | (state[7] as u64);
     (tail & fast_mask) == 0
 }
 
