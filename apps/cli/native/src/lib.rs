@@ -35,7 +35,27 @@ pub struct SearchResult {
 /// Inline trailing-zero-bit checker matching `apps/cli/src/miner.ts`.
 /// Returns true iff the SHA-256 digest has at least `bits` trailing zero bits.
 #[inline(always)]
-fn passes(digest: &[u8; 32], last_full_idx: usize, rem_mask: u8, rem_bits: u32) -> bool {
+fn passes(
+    digest: &[u8; 32],
+    fast64: bool,
+    fast_mask: u64,
+    last_full_idx: usize,
+    rem_mask: u8,
+    rem_bits: u32,
+) -> bool {
+    // Common fast-path for practical mining difficulties (<= 64 bits):
+    // treat the least-significant 64 digest bits as one little-endian u64 and
+    // check trailing-zero bits with a single mask operation.
+    if fast64 {
+        // SAFETY:
+        // - `digest` has 32 bytes, reading 8 bytes at offset 24 is in bounds.
+        // - `read_unaligned` is valid regardless of alignment.
+        let tail = u64::from_le(unsafe {
+            (digest.as_ptr().add(24) as *const u64).read_unaligned()
+        });
+        return (tail & fast_mask) == 0;
+    }
+
     // Check the last `full_bytes` bytes (positions 31, 30, ...) all zero.
     let mut i = 31usize;
     while i > last_full_idx {
@@ -67,6 +87,14 @@ pub fn hash_search(
     let rem_bits = (bits_usize & 7) as u32;
     let rem_mask: u8 = if rem_bits == 0 { 0 } else { ((1u32 << rem_bits) - 1) as u8 };
     let last_full_idx = 31usize.saturating_sub(full_bytes);
+    let fast64 = bits <= 64;
+    let fast_mask: u64 = if bits == 0 {
+        0
+    } else if bits >= 64 {
+        u64::MAX
+    } else {
+        (1u64 << bits) - 1
+    };
 
     // Prefix never changes during this search call; pre-hash it once and clone
     // that state for each nonce candidate.
@@ -101,7 +129,7 @@ pub fn hash_search(
 
         hashes += 1;
 
-        if passes(&digest_arr, last_full_idx, rem_mask, rem_bits) {
+        if passes(&digest_arr, fast64, fast_mask, last_full_idx, rem_mask, rem_bits) {
             return Ok(SearchResult {
                 found: true,
                 nonce_hi: hi,
