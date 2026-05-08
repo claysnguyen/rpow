@@ -80,6 +80,17 @@ fn passes_fast64_state(state: &[u32; 8], fast_mask: u64) -> bool {
     (tail & fast_mask) == 0
 }
 
+#[inline(always)]
+fn write_nonce_u64_le(dst: &mut [u8], offset: usize, hi: u32, lo: u32) {
+    let nonce = ((hi as u64) << 32) | (lo as u64);
+    // SAFETY:
+    // - caller ensures [offset..offset+8] is in-bounds.
+    // - write_unaligned handles alignment safely.
+    unsafe {
+        (dst.as_mut_ptr().add(offset) as *mut u64).write_unaligned(nonce.to_le());
+    }
+}
+
 #[napi]
 pub fn hash_search(
     prefix: Buffer,
@@ -132,11 +143,7 @@ pub fn hash_search(
         let nonce_offset = prefix_len;
 
         while hashes < max_iter {
-            unsafe {
-                let p = block.as_mut_ptr().add(nonce_offset) as *mut u32;
-                p.write_unaligned(lo.to_le());
-                p.add(1).write_unaligned(hi.to_le());
-            }
+            write_nonce_u64_le(&mut block, nonce_offset, hi, lo);
 
             // SHA-256 IV
             let mut state: [u32; 8] = [
@@ -191,8 +198,7 @@ pub fn hash_search(
         let nonce_offset = prefix_len;
 
         while hashes < max_iter {
-            let nonce = ((hi as u64) << 32) | (lo as u64);
-            blocks_buf[nonce_offset..nonce_offset + 8].copy_from_slice(&nonce.to_le_bytes());
+            write_nonce_u64_le(&mut blocks_buf, nonce_offset, hi, lo);
 
             // SHA-256 IV
             let mut state: [u32; 8] = [
