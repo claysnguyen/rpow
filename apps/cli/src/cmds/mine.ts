@@ -1,5 +1,5 @@
 import { ApiClient, isApiError, type ApiError } from '../api.js';
-import { defaultWorkers, minePool } from '../miner-pool.js';
+import { defaultWorkers, defaultWorkersNative, minePool } from '../miner-pool.js';
 import { nativeAvailable } from '../miner-native.js';
 import { c, die, fmtElapsed, fmtRate, progressDone, progressLine } from '../ui.js';
 
@@ -11,7 +11,7 @@ interface MineFlags {
 function parseFlags(args: string[]): MineFlags {
   let count: number | null = 1;
   let forever = false;
-  let workers = defaultWorkers();
+  let workers = nativeAvailable() ? defaultWorkersNative() : defaultWorkers();
   for (let i = 0; i < args.length; i++) {
     const a = args[i]!;
     if (a === '--forever' || a === '-f') { forever = true; continue; }

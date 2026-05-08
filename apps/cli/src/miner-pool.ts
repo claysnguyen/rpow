@@ -24,6 +24,11 @@ export function defaultWorkers(): number {
   return Math.max(1, os.cpus().length - 2);
 }
 
+/** Native backend can efficiently saturate all logical cores. */
+export function defaultWorkersNative(): number {
+  return Math.max(1, os.cpus().length);
+}
+
 interface ProgressMsg { type: 'progress'; hashes: number; elapsedMs: number }
 interface FoundMsg { type: 'found'; nonce: string; hashes: number }
 interface AbortedMsg { type: 'aborted'; hashes: number }

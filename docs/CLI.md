@@ -28,7 +28,7 @@ npm install && npm run build --workspace @rpow/shared && npm run build --workspa
 npm run build:native -w @rpow/cli   # tùy chọn nhưng nên: ~25x speedup nếu có Rust
 alias rpow="$(pwd)/node_modules/.bin/rpow"
 rpow login bạn@example.com          # paste verify URL từ email vào prompt
-rpow mine --forever                 # đào với cpus-2 worker mặc định
+rpow mine --forever                 # mặc định: native -> all cores, JS fallback -> cpus-2
 ```
 
 Chưa quen Node.js / chưa có source → đọc tiếp [phần 3](#3-cài-đặt).
@@ -280,7 +280,7 @@ In ví: email, balance, đã mint, đã gửi, đã nhận.
 |---|---|
 | `--count N` / `-n N` | Đào đúng N token rồi dừng (mặc định: 1) |
 | `--forever` / `-f` | Đào không giới hạn cho đến Ctrl-C hoặc `SUPPLY_EXHAUSTED` |
-| `--workers N` / `-w N` | Số process đào song song (mặc định: `cpus().length - 2`) |
+| `--workers N` / `-w N` | Số process đào song song (mặc định: native=`cpus`, JS=`cpus-2`) |
 
 **Ctrl-C 2 giai đoạn:**
 - Lần 1: đào nốt batch hiện tại rồi dừng sạch.
@@ -294,7 +294,7 @@ Benchmark hashrate offline — không gọi API, không tốn challenge.
 
 | Flag | Ý nghĩa | Mặc định |
 |---|---|---|
-| `--workers N` | Số process song song | `cpus-2` |
+| `--workers N` | Số process song song | native=`cpus`, JS=`cpus-2` |
 | `--seconds S` | Thời lượng đo | `10` |
 | `--bits B` | Difficulty target (cao → không bao giờ trúng → đo rate thuần) | `64` |
 
@@ -432,7 +432,7 @@ rpow-a me
 rpow-b send alice@x.com 5
 ```
 
-> **Lưu ý CPU:** 2 instance `mine` mặc định mỗi instance lấy `cpus-2` worker → tổng vượt số core, tranh nhau, hashrate KHÔNG cộng tuyến tính. Tốt hơn: chia thủ công (10 core → mỗi instance `--workers 4`, chừa 2 core cho hệ thống).
+> **Lưu ý CPU:** nếu backend native thì mỗi instance `mine` mặc định lấy toàn bộ core logic. Chạy 2 instance cùng lúc sẽ tranh CPU nặng và hashrate không cộng tuyến tính. Tốt hơn: chia thủ công (máy 10 core -> mỗi instance `--workers 4`, chừa 2 core cho hệ thống).
 
 ---
 

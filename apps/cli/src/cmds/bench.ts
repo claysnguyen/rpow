@@ -1,5 +1,5 @@
 import os from 'node:os';
-import { defaultWorkers, minePool } from '../miner-pool.js';
+import { defaultWorkers, defaultWorkersNative, minePool } from '../miner-pool.js';
 import { nativeAvailable } from '../miner-native.js';
 import { c, die, fmtElapsed, fmtRate, progressDone, progressLine } from '../ui.js';
 
@@ -10,7 +10,7 @@ interface BenchFlags {
 }
 
 function parseFlags(args: string[]): BenchFlags {
-  let workers = defaultWorkers();
+  let workers = nativeAvailable() ? defaultWorkersNative() : defaultWorkers();
   let seconds = 10;
   let bits = 64;
   for (let i = 0; i < args.length; i++) {
