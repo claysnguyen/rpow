@@ -3,11 +3,13 @@
   "private": true,
   "workspaces": ["apps/*", "packages/*"],
   "scripts": {
-    "build": "tsc -b apps/server packages/shared && npm --workspace apps/web run build",
-    "test": "npm --workspace packages/shared test && npm --workspace apps/server test && npm --workspace apps/web test",
+    "build": "tsc -b apps/server packages/shared && npm --workspace apps/web run build && npm --workspace apps/cli run build",
+    "test": "npm --workspace packages/shared test && npm --workspace apps/server test && npm --workspace apps/web test && npm --workspace apps/cli test",
     "lint": "tsc -b --noEmit && eslint .",
     "dev:server": "npm --workspace apps/server run dev",
-    "dev:web": "npm --workspace apps/web run dev"
+    "dev:web": "npm --workspace apps/web run dev",
+    "dev": "bash scripts/dev-server.sh",
+    "cli": "npm --workspace @rpow/cli run start --"
   },
   "engines": { "node": ">=22.0.0" },
   "devDependencies": {

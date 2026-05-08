@@ -41,3 +41,16 @@ npm --workspace @rpow/web run dev
 - DNS: GoDaddy (registrar)
 
 See `docs/RUNBOOK.md` for operator instructions.
+
+## Terminal client (`rpow` CLI)
+
+A pure-Node CLI lives in `apps/cli`. No browser required — login by pasting the magic-link URL from your inbox; mine, send, and check balances entirely from the shell.
+
+```bash
+npm install && npm run build --workspace @rpow/shared && npm run build --workspace @rpow/cli && npm install
+./node_modules/.bin/rpow help
+```
+
+Full guide (Vietnamese): see [`docs/CLI.md`](./docs/CLI.md).
+
+Quick reference: `login`, `me`, `mine [--count N | --forever]`, `send <email> <amount>`, `activity`, `ledger`, `logout`. Session is stored in `~/.config/rpow/session` (mode 0600); override the API base via `RPOW_API` env.

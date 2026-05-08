@@ -1,0 +1,19 @@
+{
+  "name": "@rpow/cli",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "./dist/index.js",
+  "bin": { "rpow": "./dist/index.js" },
+  "scripts": {
+    "build": "tsc -b && chmod +x dist/index.js",
+    "start": "node dist/index.js",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@rpow/shared": "*"
+  },
+  "devDependencies": {
+    "vitest": "^1.6.0"
+  }
+}
