@@ -141,6 +141,10 @@ pub fn hash_search(
         let bit_len = (msg_len as u64) * 8;
         block[56..64].copy_from_slice(&bit_len.to_be_bytes());
         let nonce_offset = prefix_len;
+        // SAFETY: GenericArray<u8, U64> and [u8; 64] share layout.
+        let blocks: &mut [GenericArray<u8, U64>; 1] = unsafe {
+            &mut *(&mut block as *mut [u8; 64] as *mut [GenericArray<u8, U64>; 1])
+        };
 
         while hashes < max_iter {
             write_nonce_u64_le(&mut block, nonce_offset, hi, lo);
@@ -151,11 +155,7 @@ pub fn hash_search(
                 0x510e527f, 0x9b05688c, 0x1f83d9ab, 0x5be0cd19,
             ];
 
-            // SAFETY: GenericArray<u8, U64> and [u8; 64] share layout.
-            let blocks: &[GenericArray<u8, U64>] = unsafe {
-                core::slice::from_raw_parts((&block as *const [u8; 64]).cast::<GenericArray<u8, U64>>(), 1)
-            };
-            compress256(&mut state, blocks);
+            compress256(&mut state, blocks.as_slice());
 
             hashes += 1;
             if passes_fast64_state(&state, fast_mask) {
@@ -196,6 +196,10 @@ pub fn hash_search(
         let bit_len = (msg_len as u64) * 8;
         blocks_buf[120..128].copy_from_slice(&bit_len.to_be_bytes());
         let nonce_offset = prefix_len;
+        // SAFETY: GenericArray<u8, U64> and [u8; 64] share layout.
+        let blocks: &mut [GenericArray<u8, U64>; 2] = unsafe {
+            &mut *(&mut blocks_buf as *mut [u8; 128] as *mut [GenericArray<u8, U64>; 2])
+        };
 
         while hashes < max_iter {
             write_nonce_u64_le(&mut blocks_buf, nonce_offset, hi, lo);
@@ -206,14 +210,7 @@ pub fn hash_search(
                 0x510e527f, 0x9b05688c, 0x1f83d9ab, 0x5be0cd19,
             ];
 
-            // SAFETY: GenericArray<u8, U64> and [u8; 64] share layout.
-            let blocks: &[GenericArray<u8, U64>] = unsafe {
-                core::slice::from_raw_parts(
-                    (&blocks_buf as *const [u8; 128]).cast::<GenericArray<u8, U64>>(),
-                    2,
-                )
-            };
-            compress256(&mut state, blocks);
+            compress256(&mut state, blocks.as_slice());
 
             hashes += 1;
             if passes_fast64_state(&state, fast_mask) {
